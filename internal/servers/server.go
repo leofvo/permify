@@ -308,20 +308,18 @@ func (s *Container) Run(
 		// Create the gRPC gateway mux
     grpcMux := runtime.NewServeMux(muxOpts...)
 
-		if err = grpcV1.RegisterPermissionHandler(ctx, grpcMux, conn); err != nil {
-			return err
+		handlers := []func(context.Context, *runtime.ServeMux, *grpc.ClientConn) error{
+			grpcV1.RegisterPermissionHandler,
+			grpcV1.RegisterSchemaHandler,
+			grpcV1.RegisterDataHandler,
+			grpcV1.RegisterBundleHandler,
+			grpcV1.RegisterTenancyHandler,
 		}
-		if err = grpcV1.RegisterSchemaHandler(ctx, grpcMux, conn); err != nil {
-			return err
-		}
-		if err = grpcV1.RegisterDataHandler(ctx, grpcMux, conn); err != nil {
-			return err
-		}
-		if err = grpcV1.RegisterBundleHandler(ctx, grpcMux, conn); err != nil {
-			return err
-		}
-		if err = grpcV1.RegisterTenancyHandler(ctx, grpcMux, conn); err != nil {
-			return err
+		
+		for _, handler := range handlers {
+			if err = handler(ctx, grpcMux, conn); err != nil {
+				return fmt.Errorf("failed to register handler: %w", err)
+			}
 		}
 
 		// Create a new http.ServeMux for serving your OpenAPI file and gRPC gateway
@@ -329,6 +327,11 @@ func (s *Container) Run(
 
 		if srv.HTTP.ExposeOpenAPI {
 			httpMux.HandleFunc("/openapi.json", func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
 				http.ServeFile(w, r, "./docs/api-reference/openapi.json")
 			})
 		}
